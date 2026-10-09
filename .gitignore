@@ -1,0 +1,9 @@
+node_modules/
+dist/
+data/
+evidence/test-data/
+evidence/browser-data/
+evidence/results.json
+evidence/browser-results.json
+.env
+.env.*
