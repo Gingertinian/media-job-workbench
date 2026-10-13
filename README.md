@@ -1,7 +1,13 @@
-# Local media export
+# Video export requests with safe retries
 
-Node/SQLite export jobs with real FFmpeg processing and a small React preview.
-Import a clip, choose a time window, export an MP4 and inspect the job history.
+A React interface for importing a clip, selecting a time window and exporting a
+playable MP4. Node records the jobs in SQLite and one local worker runs FFmpeg.
+
+The example demonstrates a request whose response disappears after the server
+accepted it. The client keeps the request key and original parameters until it
+receives a matching acknowledgment. A retry returns the existing job. The
+Restore pending export control recovers the saved form values after a reload
+or accidental editing, so an unresolved request is not silently replaced.
 By Jeronimo Munoz Larreta.
 
 ## Run
@@ -14,6 +20,7 @@ From this directory in PowerShell:
 npm.cmd ci --no-audit --no-fund
 npm.cmd run build
 npm.cmd run sample
+$env:DATA_DIR = Join-Path $env:TEMP ('media-export-' + [guid]::NewGuid().ToString('N'))
 npm.cmd start
 ```
 
@@ -28,6 +35,8 @@ $env:FFPROBE_PATH = 'C:\tools\ffmpeg\bin\ffprobe.exe'
 
 Use your own executable paths. Missing tools fail at startup. `PORT` and
 `DATA_DIR` optionally override the port and local storage directory.
+Use a short absolute `DATA_DIR` on Windows because native SQLite may fail to
+open deeply nested database paths. The folder and its contents are retained.
 
 ## Working and verified
 
@@ -44,9 +53,11 @@ The sample media is authored procedurally: a grayscale linked-pendulum motion st
 ## Checks and measured evidence
 
 ```powershell
+$env:TEST_DATA_ROOT = Join-Path $env:TEMP ('media-tests-' + [guid]::NewGuid().ToString('N'))
 npm.cmd run build
 npm.cmd test
 npm.cmd run test:browser
+npm.cmd run test:retry
 ```
 
 The build checks TypeScript and bundles the preview. Integration tests start actual servers in fresh local data directories, invoke real FFmpeg, probe/decode outputs, compare a decoded frame against the requested source time, force a process restart, and check persisted jobs. All test servers are stopped on completion. Test data is retained under `evidence/test-data/` and `evidence/browser-data/` for inspection.
@@ -55,9 +66,25 @@ Browser checks need Playwright with Chromium installed. Install it separately
 or set `PLAYWRIGHT_MODULE` to an existing `index.mjs`. It is optional for the app
 and backend tests.
 
-The test commands write detailed local reports under `evidence/`. `CHECKS.txt`
+The retry suite requires Node 24, full `FFMPEG_PATH` and `FFPROBE_PATH` paths,
+and an installed Chromium with the Playwright module available. `PLAYWRIGHT_MODULE`
+may point to an existing `index.mjs`; no browser dependency is required by the app.
+If Playwright is unavailable, the retry report explicitly marks its UI checks
+as skipped. `TEST_DATA_ROOT` controls the short isolated data directories.
+
+The retry test forwards a real successful POST through a loopback proxy, consumes
+the response, then drops the client connection. It checks same-key recovery,
+fresh-key duplication, conflicting parameters, concurrency, restart replay and
+actual MP4 decoding. UI checks cover reload recovery, changed form values,
+storage-write/removal failure and a mismatched acknowledgment. All owned test
+servers, proxy sockets and headless browser processes are stopped afterward.
+
+The test commands write detailed local reports under `evidence/`. Retry reports
+and their captures are stored in ignored `evidence/retry-contract-*` directories.
+`CHECKS.txt`
 summarizes the verified run. `evidence/preview.png` and `preview-mobile.png` are
-actual screenshots after an export.
+actual screenshots after an export. `evidence/retry-recovery.png` shows the
+retained request and recovery control while changed form values are blocked.
 
 ## API
 

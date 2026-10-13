@@ -12,7 +12,7 @@ import { binary } from '../server/runtime.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const runId = new Date().toISOString().replace(/[:.]/g, '-');
-const dataDir = path.join(root, 'evidence', 'test-data', runId);
+const dataDir = path.join(process.env.TEST_DATA_ROOT || path.join(root, 'evidence', 'test-data'), 'integration-' + runId);
 const measured = [], exec = promisify(execFile), began = performance.now();
 const ffmpeg = binary('ffmpeg'), ffprobe = binary('ffprobe');
 let server, base;
@@ -198,7 +198,7 @@ finally {
     if (child.exitCode === null) { const done = once(child, 'exit'); child.kill(); await done; }
   }
   const version = async file => (await exec(file, ['-version'], { windowsHide: true })).stdout.split('\n')[0].trim();
-  const report = { recordedAt: new Date().toISOString(), purpose: 'Sundream local editing infrastructure work sample',
+  const report = { recordedAt: new Date().toISOString(), purpose: 'Local media export integration checks',
     node: process.version, ffmpeg: { path: ffmpeg, version: await version(ffmpeg) },
     ffprobe: { path: ffprobe, version: await version(ffprobe) },
     command: 'npm run build && npm test', elapsedMs: Math.round(performance.now() - began),

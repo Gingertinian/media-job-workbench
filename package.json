@@ -8,7 +8,8 @@
     "start": "node server/main.mjs",
     "sample": "node scripts/sample.mjs",
     "test": "node tests/integration.mjs",
-    "test:browser": "node tests/browser.mjs"
+    "test:browser": "node tests/browser.mjs",
+    "test:retry": "node tests/retry-contract.mjs"
   },
   "dependencies": { "react": "19.2.0", "react-dom": "19.2.0" },
   "devDependencies": { "@types/react": "19.2.2", "@types/react-dom": "19.2.2", "typescript": "5.9.3", "vite": "7.1.9" },

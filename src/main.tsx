@@ -5,6 +5,27 @@ import './style.css';
 
 type Asset = { id: string; name: string; duration: number; width: number; height: number; sourceUrl: string };
 type Job = { id: string; assetId: string; start: number; duration: number; status: 'queued' | 'working' | 'completed' | 'error'; attempts: number; error: string | null; resultUrl: string | null; events: { status: string; at: string; reason: string | null }[] };
+type ExportRequest = { assetId: string; start: number; duration: number };
+type PendingExport = { signature: string; key: string };
+const states = ['queued', 'working', 'completed', 'error'];
+function savedRequest(value: unknown): PendingExport | null {
+  if (!value || typeof value !== 'object') return null;
+  const entry = value as Partial<PendingExport>;
+  if (typeof entry.key !== 'string' || !/^[a-zA-Z0-9_-]{8,100}$/.test(entry.key) || typeof entry.signature !== 'string') return null;
+  try {
+    const body = JSON.parse(entry.signature) as ExportRequest;
+    if (!body || typeof body.assetId !== 'string' || !Number.isFinite(body.start) || body.start < 0 || !Number.isFinite(body.duration) || body.duration < 0.1 || body.duration > 30) return null;
+    return { signature: entry.signature, key: entry.key };
+  } catch { return null; }
+}
+function acknowledgedJob(value: unknown, body: ExportRequest): value is Job {
+  if (!value || typeof value !== 'object') return false;
+  const job = value as Partial<Job>;
+  return typeof job.id === 'string' && /^[a-f0-9-]{36}$/.test(job.id) && job.assetId === body.assetId && job.start === body.start && job.duration === body.duration
+    && typeof job.status === 'string' && states.includes(job.status) && Number.isInteger(job.attempts) && Number(job.attempts) >= 0
+    && (job.error === null || typeof job.error === 'string') && (job.resultUrl === null || job.resultUrl === `/api/jobs/${job.id}/result`)
+    && Array.isArray(job.events) && job.events.every(event => event && states.includes(event.status) && typeof event.at === 'string' && Number.isFinite(Date.parse(event.at)) && (event.reason === null || typeof event.reason === 'string'));
+}
 async function api<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, options);
   const data = await response.json();
@@ -15,10 +36,11 @@ function App() {
   const [assets, setAssets] = useState<Asset[]>([]), [jobs, setJobs] = useState<Job[]>([]);
   const [assetId, setAssetId] = useState(''), [start, setStart] = useState(0), [duration, setDuration] = useState(2);
   const [message, setMessage] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false);
-  const pending = useRef<{ signature: string; key: string } | null>(null);
+  const pending = useRef<PendingExport | null>(null);
+  const [savedExport, setSavedExport] = useState<PendingExport | null>(null);
   const source = assets.find(a => a.id === assetId);
   useEffect(() => {
-    try { pending.current = JSON.parse(sessionStorage.getItem('pending-export') || 'null'); } catch { /* Empty draft. */ }
+    try { pending.current = savedRequest(JSON.parse(sessionStorage.getItem('pending-export') || 'null')); setSavedExport(pending.current); } catch { /* No readable saved request. */ }
     let mounted = true;
     async function refresh() {
       try {
@@ -40,16 +62,28 @@ function App() {
     finally { setBusy(false); }
   }
   async function submit(event: FormEvent) {
-    event.preventDefault(); setBusy(true); setError('');
-    const body = { assetId, start, duration }, signature = JSON.stringify(body);
-    if (pending.current?.signature !== signature) pending.current = { signature, key: crypto.randomUUID() };
-    sessionStorage.setItem('pending-export', JSON.stringify(pending.current));
+    event.preventDefault(); setBusy(true); setError(''); setMessage('');
     try {
-      const job = await api<Job>('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': pending.current!.key }, body: signature });
+      const body = { assetId, start, duration }, signature = JSON.stringify(body);
+      if (pending.current && pending.current.signature !== signature) throw new Error('A saved export still needs acknowledgment. Restore and retry it before starting another export.');
+      if (!pending.current) pending.current = { signature, key: crypto.randomUUID() };
+      setSavedExport(pending.current);
+      try { sessionStorage.setItem('pending-export', JSON.stringify(pending.current)); }
+      catch { throw new Error('Could not save retry details, so no export request was sent. Session storage must be available to continue safely.'); }
+      const job = await api<unknown>('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': pending.current.key }, body: signature });
+      if (!acknowledgedJob(job, body)) throw new Error('The server response did not acknowledge this export. Its request key has been kept for a safe retry.');
       setJobs(old => [job, ...old.filter(j => j.id !== job.id)]); setMessage('Export accepted.');
-      pending.current = null; sessionStorage.removeItem('pending-export');
+      try { sessionStorage.removeItem('pending-export'); }
+      catch { setMessage('Export accepted. Saved retry details could not be cleared; retrying will recover this same export.'); return; }
+      pending.current = null; setSavedExport(null);
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
+  }
+  function restorePending() {
+    if (!pending.current) return;
+    const body = JSON.parse(pending.current.signature) as ExportRequest;
+    setAssetId(body.assetId); setStart(body.start); setDuration(body.duration); setError('');
+    setMessage('Saved export restored. Queue it again to recover the same job.');
   }
   return <main>
     <header><h1>Media export</h1><p>Local demo · Jeronimo Munoz Larreta · 9 October 2026</p></header>
@@ -61,10 +95,11 @@ function App() {
         <label>Source <select value={assetId} onChange={e => { setAssetId(e.target.value); setStart(0); const a = assets.find(a => a.id === e.target.value); setDuration(Math.min(2, a?.duration || 2)); }} required disabled={busy}>
           <option value="">Choose an imported video</option>{assets.map(a => <option key={a.id} value={a.id}>{a.name} ({a.duration.toFixed(2)}s)</option>)}</select></label>
         {source && <><video key={source.id} src={source.sourceUrl} controls preload="metadata" aria-label="Source video preview" /><p className="hint">{source.width} × {source.height} · {source.duration.toFixed(2)} seconds</p></>}
-        <div className="fields"><label>Start (seconds)<input type="number" min="0" max={source ? Math.max(0, source.duration - duration) : 0} step="0.01" value={start} onChange={e => setStart(e.target.valueAsNumber)} required /></label>
-          <label>Duration (seconds)<input type="number" min="0.1" max={source ? Math.min(30, source.duration - start) : 30} step="0.01" value={duration} onChange={e => setDuration(e.target.valueAsNumber)} required /></label></div>
+        <div className="fields"><label>Start (seconds)<input type="number" min="0" max={source ? Math.max(0, source.duration - duration) : 0} step="0.01" value={start} onChange={e => setStart(e.target.valueAsNumber)} required disabled={busy} /></label>
+          <label>Duration (seconds)<input type="number" min="0.1" max={source ? Math.min(30, source.duration - start) : 30} step="0.01" value={duration} onChange={e => setDuration(e.target.valueAsNumber)} required disabled={busy} /></label></div>
         <button disabled={!source || busy} type="submit">{busy ? 'Please wait...' : 'Queue MP4 export'}</button>
       </form>
+      {savedExport && <div><p className="hint">A saved export request is retained until its matching acknowledgment is received. Changing form values will not replace it.</p><button type="button" disabled={busy} onClick={restorePending}>Restore pending export</button></div>}
       <p role="status" aria-live="polite">{message} {jobs.length ? `${jobs.filter(j => j.status === 'completed').length} completed, ${jobs.filter(j => j.status === 'working' || j.status === 'queued').length} pending, ${jobs.filter(j => j.status === 'error').length} failed.` : ''}</p>{error && <p role="alert" className="error">{error}</p>}
     </section>
     <section aria-labelledby="jobs-heading"><h2 id="jobs-heading">Job history</h2><p className="hint">Queued → working → completed or error. Interrupted work is queued again when the server restarts.</p>

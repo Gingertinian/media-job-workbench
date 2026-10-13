@@ -7,3 +7,4 @@ evidence/results.json
 evidence/browser-results.json
 .env
 .env.*
+evidence/retry-contract-*/

@@ -11,7 +11,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const { chromium } = process.env.PLAYWRIGHT_MODULE
   ? await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href)
   : await import('playwright');
-const dataDirectory = path.join(root, 'evidence', 'browser-data', new Date().toISOString().replace(/[:.]/g, '-'));
+const dataDirectory = path.join(process.env.TEST_DATA_ROOT || path.join(root, 'evidence', 'browser-data'), 'browser-' + new Date().toISOString().replace(/[:.]/g, '-'));
 const ffmpeg = binary('ffmpeg'), ffprobe = binary('ffprobe');
 const started = performance.now(), checks = [], pageErrors = [];
 let browser, failure, base;

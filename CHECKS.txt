@@ -1,24 +1,35 @@
-Verified 9 October 2026
+Verified 12 October 2026 (America/Buenos_Aires)
 
 Node 24.19.0, TypeScript 5.9.3, React 19.2.0, FFmpeg/FFprobe 7.1.
 TypeScript check and Vite production build passed.
 12 real backend/media checks passed. Five Chromium checks passed.
+14 response-loss and client-recovery regression checks passed; no skips.
+The browser checks used Chromium 151.0.7922.34.
 
-The media checks launch real local servers and FFmpeg, inspect and decode the
-output, compare the requested source time with the result, test concurrent
-idempotent requests, force a process interruption and check recovered jobs.
-The browser uploads a clip, exports it, advances actual H.264/AAC playback,
-checks visible errors, reload persistence and narrow-screen overflow.
+The integration checks start real local servers and FFmpeg, inspect and decode
+outputs, compare the requested source time with the result, test concurrent
+idempotent requests, force a process interruption and inspect recovered jobs.
+
+The retry proxy forwards an actual POST, consumes the server's complete 202
+response and closes the downstream connection. Reusing the same key returns
+the same job and one MP4 output. Using a fresh key for identical parameters
+creates another job and output. The browser also reloads the page, restores
+matching values and retries the saved request.
+
+Additional UI checks verify that editing the form cannot discard an unresolved
+key, storage errors release the form, a storage-clear error does not misreport
+an accepted export, and a mismatched 2xx acknowledgment keeps the recovery key.
+All owned test servers, proxy connections and headless browsers were stopped.
 
 The source is an authored procedural pendulum clip with synthesized audio.
-No generation provider, cloud worker or external API is used. The demo has
-one local worker and SQLite, not a distributed production scheduler.
+The demo uses one local worker and SQLite. Interrupted processing may run again
+under the same job ID; the request contract does not guarantee exactly-once
+worker execution.
 
-The script outputs detailed results to evidence/results.json and
-evidence/browser-results.json. Runtime databases and input/output directories
-are local test artifacts and excluded from version control. All test servers
-were stopped after the verification run.
+Detailed runtime reports are written to ignored evidence directories.
+The committed PNG captures show the current interface and retained-request
+recovery control. Runtime databases and generated exports stay local.
 
-Power-loss behavior, hostile-media sandboxing, Safari/Firefox, mobile hardware
-and production scaling were not verified. Treat imported files as trusted
-test inputs. See README.md for the precise local limits.
+Power loss, disk failure, hostile-media sandboxing, Safari/Firefox, mobile
+hardware and production scaling were not verified. Use trusted test inputs
+and a short DATA_DIR or TEST_DATA_ROOT on Windows. See README.md.
